@@ -1,0 +1,25 @@
+name: RakuDoc to MD
+
+on: [push]
+
+jobs:
+    container-job:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@master
+              with:
+                persist-credentials: false
+                fetch-depth: 0
+
+            - name: Render docs/sources
+              uses: addnab/docker-run-action@v3
+              with:
+                image: finanalyst/rakuast-rakudoc-render:latest
+                registry: docker.io
+                run: RenderDocs
+
+            - name: Commit and Push changes
+              uses: Andro999b/push@v1.3
+              with:
+                github_token: ${{ secrets.GITHUB_TOKEN }}
