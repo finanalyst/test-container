@@ -1,0 +1,894 @@
+=begin pod
+=TITLE Rendering Pod Distribution
+=SUBTITLE A generic distribution to render Pod in a file (program or module) or in a cache
+(eg. the Raku documentation collection). The module allows for user defined pod-blocks, user defined rendering templates,
+and user defined plugins that provide custom pod blocks, templates, and external data.
+
+This distribution ('distribution' because it contains several modules and other resources)
+provides a generic class C<ProcessedPod>, which accepts templates, and renders one or more Pod trees. The class collects
+the information in the Pod files to create page components, such as I<Table of Contents>, I<Glossary>, I<Metadata> (eg. Author, version, etc),
+and I<Footnotes>.
+
+The output
+depends entirely on the templates. Absolutely no output rendering is performed in the module that processes the POD6 files.
+The body of the text, TOC, Glossary, and Footnotes can be output or suppressed, and their position
+can be controlled using a combination of templates, or in the case of HTML, templates and CSS.
+It also means that the same generic class can be used for HTML and MarkDown, or any other output format such as epub.
+
+Two other modules are provided: C<Pod::To::HTML2> and C<Pod::To::MarkDown>. For more information on them, see L<Pod::To::HTML2|Pod2HTML2>. These have
+the functionality and default templates to be used in conjunction with the
+B<raku> (aka perl6) compiler option C<--doc=name>. Eg:
+
+    raku --doc=HTML2 a-raku-program-with-rakudoc-content.raku
+
+ProcessedPod has also been designed to allow for rendering multiple Rakudoc (POD6)
+files. In this case, the components collected from individual source, such as TOC, Glossary, Footnotes, and Metadata
+information, need to be combined. However, a user will want to have pages dedicated to the whole collection of sources,
+with the content of these collection pages described using Rakudoc (POD6), which will require customised pod and associated templates,
+but also the templates will need to have data provided from an external source (eg. the collective TOC). This functionality
+can be added via plugins.
+
+The C<Pod::To::HTML2> module has a simple way of handling customised CSS, but no way to access embedded images other than svg files.
+Modifying the templates, when there is information about the serving environment, can change this.
+
+This module uses BOTH a new Template system C<Raku-Closure-Templates> and the Moustache templating system C<Template::Mustache>.
+ProcessedPod choses the templating engine is automatically depending on how the template for Bold-face is provided.
+A different custom template engine can also be added.
+
+=head1 Creating a Renderer
+
+The first step in rendering is to create a renderer.
+
+The renderer needs to take into account the output format, eg., html, incorporate non-default templates (eg., a designer
+may want to have customised classes in paragraphs or headers). The Pod renderer requires templates for a number of
+document elements, see TEMPLATES below.
+
+Essentially, a hash of element keys pointing to Mustache strings is provided to the renderer. The C<Pod::To::HTML2> and C<Pod::To::MarkDown>
+modules in this distribution provide default templates to the C<ProcessedPod> class.
+
+The renderer can be customised on-the-fly by modifying the keys of the template hash. For example, (using a Mustache template)
+
+=begin code
+    use RenderPod;
+    my $renderer .= RenderPod.new;
+    $renderer.modify-templates( %(format-b =>
+        '<strong class="myStrongClass {{# addClass }}{{ addClass }}{{/ addClass }}">{{{ contents }}}</strong>')
+    );
+    # The default template is something like
+    #       'format-b' => '<strong{{# addClass }} class="{{ addClass }}"{{/ addClass }}>{{{ contents }}}</strong>'
+    # the effect of this change is to add myStrongClass to all instances of B<> including any extra classes added by the POD
+=end code
+
+This would be wanted if a different rendering of bold is needed in some source file, or a page component. Bear in mind that for
+HTML, it is probably better to add another css class to a specific paragraph (for example) using the Pod config metadata. This is
+picked up by ProcessedPod (as can be seen in the above example where C<addClass> is used to add an extra class to the C< <strong> > container.
+
+=head1 Pod Source Configuration
+
+Most Pod source files will begin with C<=begin pod>. Any line with C<=begin xxx> may have configuration data, eg.
+=begin code
+
+    =begin pod :kind<Language> :subkind<Language> :class<Major text>
+    ...
+
+=end code
+
+The first C<=begin pod> to be rendered after initiation, or after the C<.emit-and-renew-processed-state> method, will have its
+configuration data transferred to the C<ProcessedPod> object's C<%.pod-config-data> attribute.
+
+The rendering of page components can be explicitly turned off by setting C<no-toc>,
+C<no-glossary>, C<no-footnotes>, or C<no-meta> in the config of pod. eg
+
+=begin code
+
+    =begin pod :no-glossary
+
+=end code
+
+Configuration data provided with the first C<pod> declaration differs from configuration data
+provided by a C<=config> directive, see below, inside the lexical scope of the pod container.
+Data declared with the C<pod> header is included as configuration for the file and stored with the file.
+Data in a C<=config> directive, even if it affects the C<pod>'s lexical scope is not stored as file configuration
+data.
+
+=head1 Configuration
+
+The Rakudoc (aka POD6) original specification defines the C<=config> directive. This has the form
+
+=begin code
+    =config block-name :metadata<some-value>
+=end code
+
+C<=config> directives apply from the time they are encountered until the end of the enclosing Pod-block.
+
+The data is provided to each template in the parameter C<config>. C<config> is a hash whose keys are the name
+of the block, eg., head1, item1, code. The values associated with a key are also hashes,
+containing the pair values of the metadata.
+
+RenderPod also provides the following data:
+=item name => basename of the Rakudoc file (without extension)
+=item path => relative url to file from root of collection (with extension)
+=item lang => language (or En by default)
+=item all metadata associated with the outer C<=begin rakudoc> or C<=begin pod> block is considered
+Config data too.
+
+Config information is different to the metadata provided with a block. The metadata set with a block is
+provided only to the template of the block being processed. Config data is available to all templates
+in the lexical scope of, and after, the C<=config> directive.
+
+It is up to the template to access and use the Config data.
+
+=head1 Templates
+
+Rakudoc (POD6) files contain both content and hints about how to render the content. The aim of this module is to separate the
+output completely from processing the Rakudoc (POD6).
+
+Both a new Raku-Closure-Template system (see L<RakuClosureTemplates>) and the Template::Mustache system can be used.
+Essentially Raku-Closure-Templates are Raku C<subs> which are compiled by Raku and the run to generate a string.
+
+Another templating engine can be added, See L<Change the Templating Engine|#Change the Templating Engine>.
+
+=head2 New Templates
+
+When a ProcessPod instance is instantiated, a templating object xxxx can be passed via the C<:templates> parameter, eg.
+
+=begin code
+my $p = ProcessedPod.new;
+$p.templates(:templates( xxxx ) );
+=end code
+
+If the object is a Hash, then it is considered a Hash of all the required templates, and verified for completeness.
+
+If the object is a String, then it is considered a C<path/filename> to a file containing a Raku program that
+evaluates to a Hash, which is then verified as a Hash of all the required templates.
+
+The format of the value assigned to each key in the template Hash depends on the Template Engine.
+
+The format difference allows for C<ProcessedPod> to choose which Templating Engine to use.
+
+=head2 Additional Templates
+
+Additional templates can be added to the existing templates. The templates are added in the same way as new templates,
+but no check is made to ensure that the additional templates are the same as the initial ones. Mixing templates will
+cause an Exception to be thrown when a new template is first used.
+
+=begin code
+my $p = ProcessedPod.new;
+# some time later in the program
+$p.modify-templates(:templates( xxxx ) );
+=end code
+
+C<xxxx> may be a Hash or a Str, in which case it is taken to be a path to a Raku program that evaluates to
+a Hash.
+
+The keys of the (resultant) Hash are added to the existing templates.
+
+The previous value of existing templates can be stored depending on how the Engine Wrapper in Templating
+is written. For Mustache, the previous template is over-written. For RakuClosure, the previous value can
+be accessed. This allows for Plugins to provide a template that uses the result of the previous template.
+
+The use case for this is to allow for plugins that obtain data from, eg., headings, but to generate
+output that is provided by the heading that has gone before.
+
+=head2 Raku Closure Templates
+
+This system was introduced to speed up processing. The Pod Rendering engine generates a set of keys and parameters. It
+calls the method C<rendition> with the key and the parameters, and expects a string back with the parameters
+interpolated into the output.
+
+In addition, templates may call templates. With the exception of the key 'escaped', which expects a string only, all
+the other templates expect the signature C<( %prm, %tml? )>. C<%prm> contains the parameters to be interpolated,
+C<%tml> is the array of templates.
+
+Each template MUST return string, which may be ''.
+
+Since %tml is an object of type LinkedVals, it is possible to access the template previously existing at the
+same spot. For example, in some new template,
+
+    %(
+        heading => sub (%prm, %tml) {
+            %tml.prior('heading').( %prm, %tml )
+        },
+    )
+
+the new template (after modify-templates) will access the value from the previous template of the same
+name. But all templates are available.
+
+=head2 Mustache Templates - minor extension.
+
+The following notes are for the MustacheTemplater, because an extension of Mustache templates is used here.
+
+The Hash structure for the default RakuClosureTemplater can be found in L<Raku Closure Templater|RakuClosureTemplates>.
+
+=head3 String Template
+
+For example if C<'escaped' => '{{ contents }}', > is a line in a hash declaration of the templates, then the right hand side
+is the C<Mustache> template for the C<escaped> key. The template engine is called with a hash containing String data
+that are interpolated into the template.
+C<contents> is provided for all keys, but some keys have more complex data.
+
+=head3 Block Templates
+
+C<Mustache> by design is not intended to have any logic, although it does allow lambdas. Since the latter are not well documented
+and some template-specific preprocessing is required, or the default action of the Templating engine
+needs to be over-ridden, extra functionality is provided.
+
+Instead of a plain text template being associated with a Template Hash key, the key can be associated with
+a block that can pre-process the data provided to the Mustache engine, or change the template. The block must return a String
+with a valid Mustache template.
+
+For example,
+=begin code
+
+'escaped' => -> %params { %params<contents>.subst-mutate(/\'/, '&39;', :g ); '{{ contents }}' }
+
+=end code
+
+The block is called with a Hash parameter that is assigned to C<%params>. The C<contents> key of C<%params>) is adjusted
+because C<Mustache> does not escape single-quotes.
+
+=head3 Partials and New Templates
+
+Mustache allows for other templates to be used as partials. Thus it is possible to create new
+templates that use the templates needed by ProcessedPod and incorporate them in output templates.
+
+For example:
+=begin code
+
+$p.modify-templates( %(:newone(
+    '<container>{{ contents }}</container>'
+    ),
+    :format-b('{{> newone }}'))
+);
+
+=end code
+
+Now the pod line C< This is some B<boldish text> in a line> will result in
+
+    <p>This is some <container>boldish text</container> in a line</p>
+
+=head1 Debugging
+
+The processing stages can be followed by setting C<:debug> and/or C<:verbose>, eg
+
+    $p.debug = True;
+
+C<:verbose> has no effect without C<:debug>
+
+Debug causes information to be produced in each Block Handle, so will be triggered for each
+C<Pod::Block>
+
+Verbose causes information to be produced by the template handler and rendering subs.
+
+=head1 Handling Declarator blocks
+
+Currently Rakudoc (POD6) that starts with C<|#> or C<#=> next to a declaration are not handled consistently or correctly.
+Declarator comments only work when associated with C<Routine> declarations, such as C<sub> or C<method>.
+Declarator comments associated with variables are concatenated by the compiler with the next C<Routine> declaration.
+
+C<GenericPod> passes out the declaration code as C<:code> and the associated content as <:contents>. It also B<adds>
+the code to the C<Glossary> page component, generating a C<:target> for the link back.
+
+=head1 Change the Templating Engine
+
+The default system now is RakuClosureTemplates. The Mustache templater is also used. The choice is done automaticallt:
+if the templates supplied to
+the ProcessedPod object is Mustache, then the Mustache templater is used, otherwise the RakuClosureTemplater is used.
+
+In order to change the Templating Engine, a Templater Role needs to be created using the C<SetupTemplates> and C<RakuClosureTemplates>
+or C<MustacheTemplater> roles in
+this distribution as a model. Then a new class similar to ProcessedPod can be created as
+
+    class NewProcessedPod is GenericPod does myNewTemplater {}
+
+The new role may only need to over-ride C<method rendition( Str $key, Hash %params --> Str )>.
+
+Assuming that the templating engine is NewTemplateEngine, and that - like Template::Mustache - it is instantiates
+with C<.new>, and has a C<.render> method which takes a String template, and Hash of strings to interpolate, and
+which returns a String, viz C< .render( Str $string, Hash %params, :from( %hash-of-templates) --> Str )>.
+
+=head1 Customised Pod and Templates
+
+The Rakudoc (POD6) specification is sufficiently generic to allow for some easy customisations, and the C<Pod::To::HTML2> renderer
+in this distribution passes the associated meta data on to the template. This allows for the customisation of Pod::Blocks
+and Format Codes.
+
+=head2 Custom Pod Block
+
+Standard Pod allows for Pod::Blocks to be B<named> and configuration data provided. This allows us to leverage the standard
+syntax to allow for non-standard blocks and templates.
+
+If a class needs to be added to Pod Block, say a specific paragraph, then the following can be put in a pod file
+=begin code
+    =begin para :class<float right>
+        Paragraph texts
+    =end para
+=end code
+
+Suppose the 'para' template needs to be changed (either on the fly or at instantiation)
+
+    para => '<p{{# class }} class="{{ class }}">{{{ contents }}</p>'
+
+A completely new block can be created. For example, the HTML module adds the C<Image> custom block by
+default, and provides the C<image> template.
+
+In keeping
+with other named blocks, I<Title> case may be conventionally used for the block name
+but I<Lower> case is required for the template. Note the I<Upper> case (all letters) is reserved for
+descriptors that are added (in HTML) as meta data.
+
+Suppose we wish to have a diagram block with a source and to assign classes to it.
+We want the HTML container to be C<figure>.
+
+In the pod source code, we would have:
+=begin code
+    =for diagram :src<https://someplace.nice/fabulous.png> :class<float left>
+    This is the caption.
+=end code
+
+Note that the C<for> takes configuration parameters to be fed to the template, and ends at the first
+blank line or next C<pod> instruction.
+
+Then in the rendering program we need to provide to ProcessedPod the new object name, and the corresponding template.
+These must be the same name. Thus we would have:
+=begin code
+    use v6;
+    use Pod::To::HTML2;
+    my Pod::To::HTML2 $r .= new;
+    $r.add-custom: <diagram>;
+    $r.modify-templates( %( diagram => '<figure source="{{ src }}" class="{{ class }}">{{ contents }}</figure>' , ) );
+=end code
+
+It is possible to cause a Custom block to use another template by using the template configuration eg.,
+
+=begin code
+    =for object :template<diagram-float-left>
+        Something here
+
+    =for object
+        Something else
+
+=end code
+
+In this case the first C<object> is rendered with the template C<diagram-float-left>, which must exist in the templates
+Hash, and the second time C<object> is rendered with the default template C<object>, which also must exist.
+
+The ability to specify another template for rendering applies to most C<Pod::Block::Named>, except for the reserved
+C<TITLE>, C<SUBTILE> etc. Care needs to be taken to ensure the template specified can handle the parameters it is
+given.
+
+Pod Blocks that have been added as custom provide some extra functionality in order to aid plugin development.
+
+=head3 Plugin config data
+
+When a L<plugin is added|Plugins> the configuration data of the plugin is added to the C<ProcessedPod>
+object, and that data is provided to the template when a custom block is rendered.
+
+The data is added as a key to the parameters passed to the Template with the name of the customised block
+in lower-case, or as a key with the name set by the C<name-space> configuration.
+
+=head3 Table of Contents
+
+The Customised block's contents are added to the Table of Contents, by default at level 1. This equates
+a customised plugin block to a C<=head1> pod block.
+
+If the block's config parameters include the key C<headlevel>, then that level is used instead of 1.
+For example,
+=begin code
+    =for ListFiles :headlevel<2>
+    Some caption text
+
+=end code
+
+would include C<Some caption text> in the TOC as if it were the contents of a C<=head2> block.
+
+Setting C<:headlevel<0> > will not register the block in the TOC at all.
+
+C<:toc> puts the contents of the block in the TOC and sets C<:headlevel> to one if C<:headlevel> is
+not specified. This is the B<default> for custom blocks.
+
+C<:!toc> excludes the contents of the block in the TOC and sets C<:headlevel> to zero, unless
+C<:headlevel> is also specified. B<Headlevel> takes priority over C<:!toc>. This is the B<default>
+for the standard blocks C<Para> and C<Nested>.
+
+The parameters passed to the template will also contain a C<:target> key, which can be used to
+provide an anchor, so that when the item in the TOC is clicked (assuming HTML output), the window is
+moved to the start of the relevant content.
+
+It is for the template to use the target appropriately.
+
+=head2 Custom Format Code
+
+This is even easier to handle as all that is needed is to supply a template in the form C<format-ß> where B<ß> is a
+unicode character other than the standard codes, viz., B<B C E I K L N P T U V X Z>, which are defined
+in the Rakudoc (POD6) specification. Several of the standard codes, such as B<L> and B<X>, parse the contents, placing
+all data after C<|> in the meta container, and if separated by C<;>, meta contains a list of data itmes.
+
+If a ProcessedPod object comes across a non-standard Format Code letter, it will parse the contents, using the semantics
+defined for B<X>, as described above.
+
+If a template has been supplied of the form C<format-ß>, then it will call the template with the enclosed text as
+C<contents> or C<meta> as described above.
+
+For example, lets assume that we want a Format Code to access the L<Font Awesome Icons|https://fontawesome.com/v4.7.0/icons>.
+The template will need to be defined as follows (assuming the Mustache templater):
+
+    $r.modify-templates( %( :format-f( '<i class="fa {{{ contents }}}"></i>' ) ));
+
+And the pod text would include something like "V<this text has a F<fa-snowflake-o> icon>" in it.
+Note that although the HTML
+will be rendered correctly, it will also be necessary to ensure that the C<head-block> template is altered so that the
+C<Font Awesome> Javascript library is included.
+
+Alternatively, using C<RakuClosure Templates> a FormatCode B<S> could be defined as:
+
+    $r.modify-templates( %( format-s => sub(%prm, %tmpl) {
+        '<div class="' ~ %prm<meta> ~ '">' ~ %prm<contents> ~ '</div>'
+    } ) );
+
+In which case
+=begin code
+    =begin pod
+    This is an item for sale S<Click to purchase with XXXProvider | xxxprovider_button>
+    =end pod
+=end code
+Would yield
+
+    <div class="xxxprovider_button">Click to ourchase with XXXProvider</div>
+
+Naturally, the developer would need to set up significantly more HMTL/JS/CSS boilerplate in the header for this
+to have any action.
+
+=head1 Plugins
+
+A plugin contains Custom Pod Blocks and Custom Templates, and it may contain other data that cannot be inferred from
+the Rakudoc (POD6) content files, such as css, scss, HTML scripts, JQuery plugins, etc.
+
+Templates can be added using the C<.modify-templates> method.
+
+Custom Pod-Blocks can be added by adding to the C<.custom> array.
+
+It is better to use the convenience method C<.add-plugin>
+
+=begin code
+my $p = ProcessedPod.new;
+# some time later in the program
+$p.add-plugin( 'my-plugin' );
+=end code
+
+This means that the current working directory contains a sub-directory C<my-plugin> with the following structure
+=begin code
+my-plugin/
+-- templates.raku
+-- blocks.raku
+=end code
+
+C<templates.raku> must be a valid Raku program that evaluates to a C<Hash>.
+There is a difference between the template hash for a plugin, and the
+template hash for C<.modify-templates>.
+
+In order to allow for plugins
+to be used with multiple template engines, the first level keys may be the name
+of the templating engine. The first-level keys then point to the extra templates
+provided by the plugin.
+
+Since the default templating engine is C<RakuClosureTemplater> the first level keys
+are tested to see whether they include B<rakuclosuretemplater>. If so, other keys
+correspond to other templating engines.
+
+The current valid keys (case insensitive) are:
+=item MustacheTemplater
+=item CroTemplater
+=item RakuClosureTemplater
+
+If the B<rakuclosuretemplater> key exists, then the templates corresponding to
+the C<.templater.Str.lc> method chain are chosen.
+
+If the templater engine is B<not> C<RakuClosureTemplater> and the plugin templates do
+not contain a key for the templater engine, then a C<X::ProcessedPod::BadPluginTemplates>
+will be thrown.
+
+C<add-plugin> is defined as
+
+    add-plugin(Str $plugin-name,
+      :$path = $plugin-name,
+      :$template-raku = "templates.raku",
+      :$custom-raku = "blocks.raku",
+      :%config is copy
+    )
+
+so a different path can be set, such as a subdirectory of the CWD, and different file names for
+C<template.raku> and C<custom.raku>.
+
+A plugin can provide its own config data, eg., css, script, strings. These may then be
+used by other plugins to affect templates for the output files. The strings will be
+interpreted by those plugins.
+
+A plugin can only be added once to an object, as a precaution against over-writing.
+Adding the same name again will cause
+the method to throw an <X::ProcessedPod::NamespaceConflict> exception.
+
+Each of the raku programs are evaluated with the working directory path set to C<:path>. For example, given
+=begin code
+my-plugin/
+-- some-dir/
+------ templates.raku
+-- blocks.raku
+-- file-containing-data
+=end code
+
+C<ProcessedPod::add-plugin> will change directory to C<my-plugin> and
+run C<some-dir/templates.raku> from there. If
+C<templates.raku> needs to access C<file-containing-data> it should do so like:
+
+    'file-containing-data'.IO.slurp
+
+=head1 External Data
+
+When rendering multiple files (see L<Rendering Strategy>), it is useful to be able to add data to
+the C<ProcessedPod> object (eg. C<$pp>), which can then be used by a custom Pod::Block and
+accompanying template. The custom block and the template can be introduced by the C<.add-plugin>
+method, but the extra data can be added separately, eg., after other files have been rendered.
+
+This is done with the C<.add-data> method, eg.
+
+    $pp.add-data('name-space', $data-object, :$protect-name)
+
+Normally, it is only permitted to write to a name-space once. An attempt to overwrite the data will
+throw an <X::ProcessedPod::NamespaceConflict> exception unless C<:protect-name> is False (default is True).
+
+=head1 Rendering Strategy
+
+A rendering strategy is required for a complex task consisting of many Pod sources. A rendering strategy has to consider:
+
+=item The pod contained in a single file may be provided as one or more trees of Pod blocks. A pod tree may contain
+blocks to be referred to in a Table of Contents (TOC), and also it may contain anchors to which other documentation
+may point. This means that the pod in each separate file will automatically produces its own TOC (a list of headers in
+the order in which they appear in the pod tree(s), and its own Glossary (a list of terms that are encountered, perhaps
+multiple times for each term, within the text).
+
+=item When only a single file source is used (such as when a Pod::To::name is called by the compiler), then the content,
+TOC and glossary have to be rendered together.
+
+=item Multiple pod files will by definition exist in a collection that should be rendered together in a consistent manner.
+The content from a single source file will be called a B<Component>.
+This will be handled in another module raku-render-collection
+There have to be the following facilities
+    =item A strategy to create one or more TOC's for the whole collection that collect and combine all the B<Component>
+    TOC's. The intent is to allow for TOCs that are designed and do not follow the alphabetical name of the B<Component>
+    source, together with a default alphabetical list.
+
+    =item A strategy to create one or more Glossary(ies) from all the B<Component> glossaries
+
+=head1 Rendering many Pod Sources
+
+A complete render strategy has to deal with multiple page components.
+
+The following sketches the use of the C<Pod::To::HTML2> class.
+
+For example, suppose we want to render each POD source file as a separate html file, and combine the global page components
+separately.
+
+The the C<ProcessedPob> object expects a compiled Pod object. One way to do this is use the C<Pod::From::Cache> module.
+
+=begin code :lang<raku>
+    use Pod::To::HTML2;
+    my $p = Pod::To::HTML2.new;
+    my %pod-input; # key is the path-name for the output file, value is a Pod::Block
+    my @processed;
+
+    #
+    # ... populate @pod-input, eg from a document cache, or use EVALFILE on each source
+    #
+
+    my $counter = 1; # a counter to illustrate how to change output file name
+
+    for %pod-input.kv -> $nm, $pd {
+        with $p { # topicalises the processor
+            .name = $nm;
+            # change templates on a per file basis before calling process-pod,
+            # to be used with care because it forces a recache of the templates, which is slow
+            # also, the templates probably need to be returned to normal (not shown here), again requiring a recache
+            if $nm ~~ /^ 'Class' /
+            {
+                .replace-template( %(
+                    format-b => '<strong class="myStrongClass {{# addClass }}{{ addClass }}{{/ addClass }}">{{{ contents }}}</strong>'
+                    # was 'format-b' => '<strong{{# addClass }} class="{{ addClass }}"{{/ addClass }}>{{{ contents }}}</strong>'
+                    # the effect of this change is to add myStrongClass to all instances of B<> including any extra classes added by the POD
+                ))
+            }
+            .process-pod( $pd );
+            # change output name from $nm if necessary
+            .file-wrap( "{ $counter++ }_$nm" );
+            # get the pod structure, delete the information to continue with a new pod tree, retain the cached templates
+            @processed.append: $p.emit-and-renew-processed-state;
+        }
+    }
+    # each instance of @processed will have TOC, Glossary and Footnote arrays that can be combined in some way
+    for @processed {
+        # each file has been written, but now process the collection page component data and write the files for all the collection
+    }
+    # code to write global TOC and Glossary html files.
+=end code
+
+=head1 Methods Provided by ProcessedPod
+
+=head2 modify-templates
+
+    method modify-templates( %new-templates )
+
+Allows for templates to be modified or new ones added before or during pod processing.
+
+B<Note:> Since the templating engine needs to be reinitialised in order to clear a template
+cache, it is probably not efficient to modify templates too many times during processing.
+
+C<modify-templates> B<replaces> the keys in the C<%new-templates> hash. It will add new keys
+to the internal template store.
+
+Example:
+=begin code
+use PodRender;
+my PodRender $p .= new;
+$p.templates( 'path/to/newtemplates.raku');
+$p.replace-template( %(
+                    format-b => '<strong class="myStrongClass {{# addClass }}{{ addClass }}{{/ addClass }}">{{{ contents }}}</strong>'
+                    # was 'format-b' => '<strong{{# addClass }} class="{{ addClass }}"{{/ addClass }}>{{{ contents }}}</strong>'
+                    # the effect of this change is to add myStrongClass to all instances of B<> including any extra classes added by the POD
+                ))
+=end code
+
+=head2 rewrite-target
+
+This method may need to be over-ridden, eg., for MarkDown which uses a different targetting function.
+
+    method rewrite-target(Str $candidate-name is copy, :$unique --> Str )
+
+Rewrites targets (link destinations) to be made unique and to be cannonised depending on the output format.
+Takes the candidate name and whether it should be unique, returns with the cannonised link name
+Target names inside the POD file, eg., headers, glossary, footnotes
+The function is called to cannonise the target name and to ensure - if necessary - that
+the target name used in the link is unique.
+The following method uses an algorithm designed to pass the legacy C<Pod::To::HTML> tests.
+
+When indexing a unique target is needed even when same entry is repeated
+When a Heading is a target, the reference must come from the name
+
+=begin code
+
+method rewrite-target(Str $candidate-name is copy, :$unique --> Str) {
+        return $!default-top if $candidate-name eq $!default-top;
+        # don't rewrite the top
+
+        $candidate-name = $candidate-name.subst(/\s+/, '_', :g);
+        if $unique {
+            $candidate-name ~= '_0' if $candidate-name (<) $!targets;
+            ++$candidate-name while $!targets{$candidate-name};
+            # will continue to loop until a unique name is found
+        }
+        $!targets{$candidate-name}++;
+        # now add to targets, no effect if not unique
+        $candidate-name
+    }
+=end code
+
+=head2 add-plugin
+
+This is documented above. It is defined as:
+
+    method add-plugin(Str $plugin-name,
+          :$path = $plugin-name,
+          :$template-path = "$path/templates.raku",
+          :$custom-path = "$path/blocks.raku",
+          :%config
+          )
+
+=head2 add-custom( $block )
+
+A method for adding strings to the @.custom array.
+
+If $block is a Str then it is a path to a Raku program that evaluates to an Array,
+whose elements are appended to @.custom.
+
+If $block is an Array, then the elemsnts are added to @.custom.
+
+=head2 add-templates( $template )
+
+Like C<add-custom>, if $template is a hash, it will be given to modify templates, otherwise it will be consiered
+a program that evaluates to a hash.
+
+=head1 add-data( $name-space, $object )
+
+Adds the object to the data area of the C<ProcessedPod> object with the key <name-space>.
+
+=head1 get-data( $name-space )
+
+Returns the data object.
+
+=head2 process-pod
+
+    method process-pod( $pod )
+
+Process the pod block or tree passed to it, and concatenates it to previous pod tree.
+Returns a string representation of the tree in the required format
+
+=head2 render-block
+
+    method render-block( $pod )
+
+Renders a pod tree, but probably a block
+Returns only the pod that was passed
+
+=head2 render-tree
+
+    method render-tree( $pod )
+
+Tenders the whole pod tree
+Is actually an alias to process-pod
+
+=head2 emit-and-renew-processed-state
+
+    method emit-and-renew-processed-state
+
+Returns the PodFile object (see below) containing the data collected from a processed file. The rendered text
+is not kept, and should be handled before using this method.
+
+A new PodFile object is instantiatedd, which deletes any previously processed pod, keeping the template engine cache
+
+=head2 file-wrap
+
+    method file-wrap(:$filename = $.name, :$ext = 'html' , :$dir = '')
+
+Saves the rendered pod tree as a file, and its document structures, uses source wrap
+Filename defaults to the name of the pod tree, and ext defaults to html, to another directory dir.
+
+So C<.file-wrap(:filename(fn),:ext<txt>,:dir<some/other/path> )> would be C<some/other/path/fn.txt>
+
+Raku has limits on file system management, so this may fail if the directory does not exist.
+
+=head2 source-wrap
+
+    method source-wrap( --> Str )
+
+Renders all of the document structures, and wraps them and the body
+Uses the source-wrap template
+
+=head2 Individual component renderers
+
+The following are called by C<source-wrap> but could be called separately, eg., if a different textual template such
+as C<format-b> should be used inside the component.
+
+=item method render-toc( --> Str )
+=item method render-glossary(-->Str)
+=item method render-footnotes(--> Str)
+=item method render-meta(--> Str)
+
+=head1 Public Class Attributes
+
+Within the templating Role
+=begin code
+    #| the following are required to render pod. Extra templates, such as head-block and header can be added by a subclass
+    has @.required = < block-code comment declarator defn dlist-end dlist-start escaped footnotes format-b format-c
+        format-i format-k format-l format-n format-p format-r format-t format-u format-x glossary heading
+        item list meta unknown-name output para pod raw source-wrap table toc >;
+    #| must have templates. Generically, no templates loaded.
+    has Bool $.templates-loaded is rw = False;
+    has $.templater-is is rw = 'rakuclosure';
+    #| storage of loaded templates
+    has %.tmpl;
+    #| a variable to collect which templates have been used for trace and debugging
+    has BagHash $.templs-used .= new;
+=end code
+
+Within the PodFile class
+=begin code
+    #| Text between =TITLE and first header, this is used to refer for textual placenames
+    has $.front-matter is rw = 'preface';
+    #| Name to be used in titles and files.
+    has Str $.name is rw is default('UNNAMED') = 'UNNAMED';
+    #| The string part of a Title.
+    has Str $.title is rw is default('UNNAMED') = 'UNNAMED';
+    #| A target associated with the Title Line
+    has Str $.title-target is rw is default(DEFAULT_TOP) = DEFAULT_TOP;
+    has Str $.subtitle is rw is default('') = '';
+    #| should be path of original document, defaults to $.name
+    has Str $.path is rw is default('UNNAMED') = 'UNNAMED';
+    #| defaults to top, then becomes target for TITLE
+    has Str $.top is rw is default(DEFAULT_TOP) = DEFAULT_TOP;
+
+    # document level information
+
+    #| language of pod file
+    has $.lang is rw is default('en') = 'en';
+    #| information to be included in eg html header
+    has @.raw-metadata;
+    #| toc structure , collected and rendered separately to body
+    has @.raw-toc;
+    #| glossary structure
+    has %.raw-glossary;
+    #| footnotes structure
+    has @.raw-footnotes;
+    #| when source wrap is called
+    has Str $.renderedtime is rw is default('') = '';
+    #| the set of targets used in a rendering process
+    has SetHash $.targets .= new;
+    #| config data given to the first =begin pod line encountered
+    #| there may be multiple pod blocks in a file, and they may be
+    #| sequentially rendered.
+    #| Can contain information about rendering footnotes/toc/glossary/meta
+    #| Template used can be changed on a per file basis
+    has %.pod-config-data is rw;
+    #| Structure to collect links, eg. to test whether they all work
+    has %.links;
+    #| the templates used to render this file
+    has BagHash $.templates-used is rw;
+=end code
+
+Within the GenericPod class
+=begin code
+    has PodFile $.pod-file .= new;
+
+    # Output rendering information set by environment
+    #| set to True eliminates meta data rendering
+    has Bool $.no-meta is rw = False;
+    #| set to True eliminates rendering of footnotes
+    has Bool $.no-footnotes is rw = False;
+    #| set to True to exclude TOC even if there are headers
+    has Bool $.no-toc is rw = False;
+    #| set to True to exclude Glossary even if there are internal anchors
+    has Bool $.no-glossary is rw = False;
+
+    # Output set by subclasses or collection
+
+    #| default extension for saving to file
+    #| should be set by subclasses
+    has $.def-ext is rw is default('') = '';
+
+    # Data relating to the processing of a Pod file
+
+    # debugging
+    #| outputs to STDERR information on processing
+    has Bool $.debug is rw = False;
+    #| outputs to STDERR more detail about errors.
+    has Bool $.verbose is rw = False;
+
+    #| defaults to not escaping characters when in a code block
+    has Bool $.no-code-escape is rw is default(False) = False;
+
+    # populated by process-pod method
+    #| single process call
+    has Str $.pod-body is rw;
+    #| concatenation of multiple process calls
+    has Str $.body is rw = '';
+    #| metadata when rendered
+    has Str $.metadata;
+    #| rendered toc
+    has Str $.toc;
+    #| rendered glossary
+    has Str $.glossary;
+    #| rendered footnotes
+    has Str $.footnotes;
+    #| A pod line may have no config data, so flag if pod block processed
+    has Bool $.pod-block-processed is rw = False;
+
+    #| custom blocks
+    has @.custom = ();
+    #| plugin data, accessible via add/get plugin-data
+    has %!plugin-data = {};
+=end code
+
+=head1 Templates
+
+More information can be found in L<PodTemplates|PodTemplates>
+
+There is a minimum set of templates that must be provided for a Pod file to be rendered. These are:
+=begin code
+    < block-code comment declarator defn dlist-end dlist-start escaped footnotes format-b format-c
+        format-i format-k format-l format-n format-p format-r format-t format-u format-x glossary heading
+        item list meta unknown-name output para pod raw source-wrap table toc >
+=end code
+
+When the C<.templates> method is called, the templates will be checked against this list for completeness. An
+Exception will be thrown if all the templates are not provided. Extra templates can be included. C<Pod::To::HTML2>
+uses this to have partial templates that use the required templates.
+
+=end pod

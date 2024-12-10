@@ -1,0 +1,80 @@
+=begin pod
+
+=TITLE Raku Closure Templates
+
+=SUBTITLE Templates are Raku Subroutines
+
+In order to increase the speed of Pod6 Renderering, it was necessary for the templates to be compiled directly into
+subroutines. On one hand, this offers the opportunity for the templates to become much more flexible, as data can be
+manipulated, but on the other hand, the templates become more difficult to understand.
+
+This distribution provides a tool for testing any set of templates against the L<minimum template set|PodTemplates>
+and against custom templates whose structure is passed to it.
+
+=head1 Template structure
+
+The templates are collected together into a hash of subroutines. With the sole exceptions of 'raw' and 'escaped', every
+subroutine has the form
+
+    'template-name' => sub (%prm, %tml) { ... };
+    # the exceptions are
+    'escaped' => sub ( $s ) { $s.trans( ... , ... ); }
+    'raw' => sub ( $s ) { $s };
+
+In fact, 'escaped' and 'raw' are treated specially by the C<RakuClosureTemplater> Role. C<GenericPod> provides the
+information to both as a hash with the text in C<contents>. This text is extracted and sent to the C<escaped> template
+as a string, and simply returned without template processing for C<raw>.
+
+The hash C<%prm> contains the parameters to be included in the template, C<%tml> contains the hash of the templates.
+
+=head1 The C<%prm> keys
+
+Each key may point to a C<Str> scalar or a C<Hash>. Any other structure will be rejected by the C<test-templates.raku>
+tool, and will most probably throw an exception. In any case, C<GenericPod> does not generate template requests with
+any other structure.
+
+Within the top-level C<Hash>, the keys may point to a C<Str>, a C<Hash> or an C<Array>. The elements of these are in
+the table:
+
+=begin table :caption<Elements of %prm hash>
+
+ level | allowable Type | element Type
+ ======|================|==============
+  top  | Str            | n/a
+  top  | Hash           | Str
+       |                | Bool
+       |                | Hash
+       |                | Array
+ ! top | Str            | n/a
+ ! top | Bool           | n/a
+ ! top | Hash           | Str
+       |                | Bool
+       |                | Hash
+       |                | Array
+ ! top | Array          | Str
+ ! top | Array          | Hash
+=end table
+
+=head1 The C<%tml> Hash
+
+This is the hash of all the templates, except C<raw> since it is anticipated C<raw> will only be the same as
+the characters in the string themselves. C<raw> is there to be an alternative to C<escaped>.
+
+The C<escaped> template should be called as
+
+    %tml<escaped>( ｢some string｣ )
+
+Another template typically will be called as
+
+    %tml<toc>( %prm, %tml)
+
+However, since a template is a normal B<Raku> subroutine, C<%prm> could be substituted with any C<Hash>, eg.,
+
+    %tml<title>( { :title(｢Some arbitrary string｣) }, %tml ).
+
+The presence of %tml is to allow for templates to call other templates.
+
+=end pod
+
+
+
