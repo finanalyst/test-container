@@ -17,6 +17,7 @@ jobs:
               with:
                 image: finanalyst/rakuast-rakudoc-render:latest
                 registry: docker.io
+                options: -v ${{github.workspace}}/docs:/docs -v ${{github.workspace}}:/to
                 run: RenderDocs
 
             - name: Commit and Push changes
