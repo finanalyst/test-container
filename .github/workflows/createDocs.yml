@@ -15,10 +15,10 @@ jobs:
             - name: Render docs/sources
               uses: addnab/docker-run-action@v3
               with:
-                image: finanalyst/rakuast-rakudoc-render:latest
+                image: finanalyst/test-explore:latest
                 registry: docker.io
-                options: -v ${{github.workspace}}/docs:/docs -v ${{github.workspace}}:/to
-                run: RenderDocs
+#                options: -v ${{github.workspace}}/docs:/docs -v ${{github.workspace}}:/to
+                run: explore
 
             - name: Commit and Push changes
               uses: Andro999b/push@v1.3
