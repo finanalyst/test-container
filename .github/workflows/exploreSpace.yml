@@ -17,7 +17,7 @@ jobs:
               with:
                 image: finanalyst/test-explore:latest
                 registry: docker.io
-#                options: -v ${{github.workspace}}/docs:/docs -v ${{github.workspace}}:/to
+                options: -v ${{github.workspace}}/docs:/docs -v ${{github.workspace}}:/to
                 run: explore
 
             - name: Commit and Push changes
