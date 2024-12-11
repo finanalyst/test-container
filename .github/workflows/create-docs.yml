@@ -1,7 +1,10 @@
-name: Look at workspace
-
-on: [push]
-
+name: RakuDoc to MD
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: ["main"]
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
 jobs:
     container-job:
         runs-on: ubuntu-latest
@@ -15,10 +18,10 @@ jobs:
             - name: Render docs/sources
               uses: addnab/docker-run-action@v3
               with:
-                image: finanalyst/test-explore:latest
+                image: finanalyst/rakuast-rakudoc-render:latest
                 registry: docker.io
                 options: -v ${{github.workspace}}/docs:/docs -v ${{github.workspace}}:/to
-                run: explore
+                run: RenderDocs
 
             - name: Commit and Push changes
               uses: Andro999b/push@v1.3
