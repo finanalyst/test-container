@@ -980,8 +980,8 @@ method source-wrap( --> Str )
 
 ----
 
-Rendered from docs/docs/RenderPod.rakudoc at 14:52 UTC on 2024-12-13
+Rendered from docs/docs/RenderPod.rakudoc at 15:06 UTC on 2024-12-13
 
-Source last modified at 14:51 UTC on 2024-12-13
+Source last modified at 15:06 UTC on 2024-12-13
 
 
