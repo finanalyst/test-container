@@ -14,15 +14,13 @@ jobs:
               with:
                 persist-credentials: false
                 fetch-depth: 0
-
             - name: Render docs/sources
               uses: addnab/docker-run-action@v3
               with:
                 image: finanalyst/rakuast-rakudoc-render:latest
                 registry: docker.io
                 options: -v ${{github.workspace}}/docs:/docs -v ${{github.workspace}}:/to
-                run: RenderDocs
-
+                run: RenderDocs --to=/to
             - name: Commit and Push changes
               uses: Andro999b/push@v1.3
               with:
